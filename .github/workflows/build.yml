@@ -14,8 +14,8 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  # 内嵌前端来源（合并回 dev 后可改成 dev）
-  BOOK_REF: app-client
+  # 内嵌前端来源（App 跟随 dev 打包）
+  BOOK_REF: dev
 
 jobs:
   # 构建 Nuxt SPA 静态包（内嵌进客户端，页面本地秒开；API/WS 走 MOYU_URL）
