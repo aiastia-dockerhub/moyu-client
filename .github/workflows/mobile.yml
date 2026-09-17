@@ -90,6 +90,13 @@ jobs:
       - name: Init iOS project
         run: npx --yes @tauri-apps/cli ios init
 
+      # Xcode 的 Build Rust Code 阶段用 npm exec 调 CLI, 需要 gen/apple 下有 package.json + 本地 CLI
+      - name: Prepare iOS npm shim
+        run: |
+          cd src-tauri/gen/apple
+          printf '{"name":"moyu-ios","private":true,"version":"0.0.0","scripts":{"tauri":"tauri"}}\n' > package.json
+          npm install --no-save @tauri-apps/cli
+
       - name: Build unsigned IPA
         env:
           MOYU_URL: ${{ secrets.MOYU_URL }}
