@@ -13,12 +13,14 @@ pub fn run() {
 
     tauri::Builder::default()
         .setup(move |app| {
-            WebviewWindowBuilder::new(app, "main", WebviewUrl::External(url.clone()))
+            let builder = WebviewWindowBuilder::new(app, "main", WebviewUrl::External(url.clone()))
                 .title("墨语")
                 .inner_size(1440.0, 960.0)
-                .min_inner_size(1024.0, 700.0)
-                .center()
-                .build()?;
+                .min_inner_size(1024.0, 700.0);
+            // center() 仅桌面端有
+            #[cfg(desktop)]
+            let builder = builder.center();
+            builder.build()?;
             Ok(())
         })
         .run(tauri::generate_context!())
