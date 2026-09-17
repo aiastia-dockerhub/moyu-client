@@ -57,6 +57,7 @@ jobs:
       # Android Studio 的注入签名同机制
       - name: Inject signing config into gradle
         run: |
+          printf '\n' >> src-tauri/gen/android/gradle.properties
           cat >> src-tauri/gen/android/gradle.properties <<EOF
           android.injected.signing.store.file=/tmp/moyu.jks
           android.injected.signing.store.password=$KS_PASS_FINAL
