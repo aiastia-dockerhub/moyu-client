@@ -62,11 +62,12 @@ jobs:
       - name: Build APK (arm64)
         env:
           MOYU_URL: ${{ secrets.MOYU_URL }}
-          TAURI_ANDROID_KEYSTORE_PATH: /tmp/moyu.jks
-          TAURI_ANDROID_KEYSTORE_PASSWORD: ${{ env.KS_PASS_FINAL }}
-          TAURI_ANDROID_KEY_ALIAS: moyu
-          TAURI_ANDROID_KEY_PASSWORD: ${{ env.KS_PASS_FINAL }}
-        run: npx --yes @tauri-apps/cli@$TAURI_CLI_VERSION android build --target aarch64 --apk
+        run: >
+          npx --yes @tauri-apps/cli@$TAURI_CLI_VERSION android build --target aarch64 --apk --
+          -Pandroid.injected.signing.store.file=/tmp/moyu.jks
+          -Pandroid.injected.signing.store.password=$KS_PASS_FINAL
+          -Pandroid.injected.signing.key.alias=moyu
+          -Pandroid.injected.signing.key.password=$KS_PASS_FINAL
 
       - uses: actions/upload-artifact@v4
         with:
