@@ -2,6 +2,8 @@ target/
 .DS_Store
 *.dmg
 src-tauri/gen/
+src-tauri/app-dist/*
+!src-tauri/app-dist/.gitkeep
 keystore/
 *.jks
 node_modules/

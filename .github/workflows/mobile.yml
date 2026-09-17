@@ -15,12 +15,52 @@ concurrency:
 
 env:
   TAURI_CLI_VERSION: "2.11.4"
+  # 内嵌前端来源（合并回 dev 后可改成 dev）
+  BOOK_REF: app-client
 
 jobs:
-  android:
+  # Nuxt SPA 静态包，与 build.yml 的 frontend job 相同
+  frontend:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          repository: aiastia/book
+          ref: ${{ env.BOOK_REF }}
+          token: ${{ secrets.MOYU_SOURCE_TOKEN }}
+          sparse-checkout: frontend
+          path: book
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: book/frontend/package-lock.json
+
+      - name: Build frontend
+        working-directory: book/frontend
+        env:
+          NUXT_PUBLIC_API_BASE: ${{ secrets.MOYU_URL }}
+          NUXT_PUBLIC_APP_MODE: 'true'
+        run: |
+          npm ci
+          npx nuxt generate
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: app-dist
+          path: book/frontend/.output/public/
+
+  android:
+    needs: frontend
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: app-dist
+          path: src-tauri/app-dist
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -201,8 +241,6 @@ jobs:
           npm install --no-save @tauri-apps/cli@$TAURI_CLI_VERSION
 
       - name: Build APK (arm64)
-        env:
-          MOYU_URL: ${{ secrets.MOYU_URL }}
         run: npx --yes @tauri-apps/cli@$TAURI_CLI_VERSION android build --target aarch64 --apk
 
       - uses: actions/upload-artifact@v4
@@ -220,10 +258,16 @@ jobs:
   # 无 Apple 开发者账号也能出未签名 ipa: --ci 让 CLI 供给 xcode 脚本阶段的
   # options 服务, --no-sign 跳过签名。Xcode 26 会挂, 必须用 macos-15 (Xcode 16)
   ios:
+    needs: frontend
     runs-on: macos-15
     continue-on-error: true
     steps:
       - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: app-dist
+          path: src-tauri/app-dist
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -246,8 +290,6 @@ jobs:
           npm install --no-save @tauri-apps/cli@$TAURI_CLI_VERSION
 
       - name: Build unsigned IPA
-        env:
-          MOYU_URL: ${{ secrets.MOYU_URL }}
         run: npx --yes @tauri-apps/cli@$TAURI_CLI_VERSION ios build --target aarch64 --ci --no-sign
 
       - name: Collect IPA

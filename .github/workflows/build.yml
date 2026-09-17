@@ -13,8 +13,45 @@ concurrency:
   group: build-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  # 内嵌前端来源（合并回 dev 后可改成 dev）
+  BOOK_REF: app-client
+
 jobs:
+  # 构建 Nuxt SPA 静态包（内嵌进客户端，页面本地秒开；API/WS 走 MOYU_URL）
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: aiastia/book
+          ref: ${{ env.BOOK_REF }}
+          token: ${{ secrets.MOYU_SOURCE_TOKEN }}
+          sparse-checkout: frontend
+          path: book
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: book/frontend/package-lock.json
+
+      - name: Build frontend
+        working-directory: book/frontend
+        env:
+          NUXT_PUBLIC_API_BASE: ${{ secrets.MOYU_URL }}
+          NUXT_PUBLIC_APP_MODE: 'true'
+        run: |
+          npm ci
+          npx nuxt generate
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: app-dist
+          path: book/frontend/.output/public/
+
   build:
+    needs: frontend
     strategy:
       fail-fast: false
       matrix:
@@ -35,6 +72,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - uses: actions/download-artifact@v4
+        with:
+          name: app-dist
+          path: src-tauri/app-dist
+
       - name: Install Linux deps
         if: matrix.platform == 'ubuntu-latest'
         run: |
@@ -51,19 +93,18 @@ jobs:
 
       # 从 app-icon.png 重新生成全平台图标（含正确的 Windows .ico）
       - name: Generate icons
-        run: npx --yes @tauri-apps/cli icon src-tauri/icons/app-icon.png -o src-tauri/icons
+        run: npx --yes @tauri-apps/cli@2.11.4 icon src-tauri/icons/app-icon.png -o src-tauri/icons
 
       - name: Build app
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          MOYU_URL: ${{ secrets.MOYU_URL }}
         with:
           projectPath: .
           args: ${{ matrix.args }}
           tagName: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || '' }}
           releaseName: 'Moyu ${{ github.ref_name }}'
-          releaseBody: '墨语桌面客户端，全部未签名。mac 首次打开右键→打开；Windows SmartScreen 点更多信息→仍要运行。'
+          releaseBody: '墨语桌面客户端（前端内嵌，秒开）。未签名：mac 首次打开右键→打开；Windows SmartScreen 点更多信息→仍要运行。'
           releaseDraft: false
           prerelease: false
 
