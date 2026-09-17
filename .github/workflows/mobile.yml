@@ -39,6 +39,31 @@ jobs:
       - name: Init Android project
         run: npx --yes @tauri-apps/cli@$TAURI_CLI_VERSION android init
 
+      # 模板 enableEdgeToEdge() + targetSdk 36 → UI 顶进状态栏; 换成系统栏 insets padding
+      - name: Patch MainActivity for system bar insets
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path("src-tauri/gen/android/app/src/main/java/com/aiastia/moyu/MainActivity.kt")
+          s = p.read_text()
+          s = s.replace(
+              "import android.os.Bundle\nimport androidx.activity.enableEdgeToEdge",
+              "import android.os.Bundle\nimport androidx.core.view.ViewCompat\nimport androidx.core.view.WindowInsetsCompat",
+          )
+          s = s.replace(
+              "    enableEdgeToEdge()\n    super.onCreate(savedInstanceState)",
+              """    super.onCreate(savedInstanceState)
+                val content = findViewById(android.R.id.content)
+                ViewCompat.setOnApplyWindowInsetsListener(content) { v, insets ->
+                  val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
+                  v.setPadding(bars.left, bars.top, bars.right, bars.bottom)
+                  WindowInsetsCompat.CONSUMED
+                }""",
+          )
+          p.write_text(s)
+          assert "ViewCompat" in s and "enableEdgeToEdge" not in s, "MainActivity patch failed"
+          PY
+
       - name: Prepare signing keystore
         env:
           KS_B64: ${{ secrets.MOYU_ANDROID_KEYSTORE_B64 }}
