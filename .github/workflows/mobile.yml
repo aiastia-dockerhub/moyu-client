@@ -29,6 +29,9 @@ jobs:
       - name: Generate icons
         run: npx --yes @tauri-apps/cli icon src-tauri/icons/app-icon.png -o src-tauri/icons
 
+      - name: Init Android project
+        run: npx --yes @tauri-apps/cli android init
+
       - name: Prepare signing keystore
         env:
           KS_B64: ${{ secrets.MOYU_ANDROID_KEYSTORE_B64 }}
@@ -87,9 +90,9 @@ jobs:
         env:
           MOYU_URL: ${{ secrets.MOYU_URL }}
         run: |
-          PROJ=$(find src-tauri/gen/ios -maxdepth 1 -name "*.xcodeproj" | head -1)
+          PROJ=$(find src-tauri/gen -maxdepth 2 -name "*.xcodeproj" | head -1)
           echo "project: $PROJ"
-          SCHEME=$(xcodebuild -list -json -project "$PROJ" | python3 -c "import json,sys;print(json.load(sys.stdin)['scheme']['name'][0])")
+          SCHEME=$(xcodebuild -list -json -project "$PROJ" | python3 -c "import json,sys;print(json.load(sys.stdin)['schemes'][0])")
           echo "scheme: $SCHEME"
           xcodebuild -project "$PROJ" -scheme "$SCHEME" -configuration Release \
             -destination 'generic/platform=iOS' -derivedDataPath build \
