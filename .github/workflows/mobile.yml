@@ -53,6 +53,17 @@ jobs:
           fi
           echo "KS_PASS_FINAL=${KS_PASS:-moyu12345}" >> "$GITHUB_ENV"
 
+      # v2 CLI 已无签名参数; android.injected.signing.* 写进 gradle.properties 与
+      # Android Studio 的注入签名同机制
+      - name: Inject signing config into gradle
+        run: |
+          cat >> src-tauri/gen/android/gradle.properties <<EOF
+          android.injected.signing.store.file=/tmp/moyu.jks
+          android.injected.signing.store.password=$KS_PASS_FINAL
+          android.injected.signing.key.alias=moyu
+          android.injected.signing.key.password=$KS_PASS_FINAL
+          EOF
+
       # gradle 的 rustBuild 任务从 src-tauri 调 npm run 找 CLI, 同样需要根 package.json
       - name: Prepare root npm project for gradle
         run: |
@@ -62,12 +73,7 @@ jobs:
       - name: Build APK (arm64)
         env:
           MOYU_URL: ${{ secrets.MOYU_URL }}
-        run: >
-          npx --yes @tauri-apps/cli@$TAURI_CLI_VERSION android build --target aarch64 --apk --
-          -Pandroid.injected.signing.store.file=/tmp/moyu.jks
-          -Pandroid.injected.signing.store.password=$KS_PASS_FINAL
-          -Pandroid.injected.signing.key.alias=moyu
-          -Pandroid.injected.signing.key.password=$KS_PASS_FINAL
+        run: npx --yes @tauri-apps/cli@$TAURI_CLI_VERSION android build --target aarch64 --apk
 
       - uses: actions/upload-artifact@v4
         with:
