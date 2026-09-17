@@ -84,7 +84,54 @@ jobs:
                 swipe.setOnRefreshListener {
                   webview.reload()
                   swipe.isRefreshing = false
-                }""",
+                }
+                // 启动遮罩: 动态加载动画盖住 WebView, 页面进度 100% 后淡出(20s 兜底强制淡出)
+                val density = resources.displayMetrics.density
+                val overlay = android.widget.FrameLayout(this)
+                overlay.setBackgroundColor(Color.parseColor("#171A24"))
+                overlay.isClickable = true
+                val icon = android.widget.ImageView(this)
+                icon.setImageResource(getApplicationInfo().icon)
+                val ip = android.widget.FrameLayout.LayoutParams(
+                    (170 * density).toInt(), (170 * density).toInt(), android.view.Gravity.CENTER
+                )
+                ip.topMargin = (-60 * density).toInt()
+                overlay.addView(icon, ip)
+                val bar = android.widget.ProgressBar(this)
+                bar.indeterminateTintList = android.content.res.ColorStateList.valueOf(Color.parseColor("#F0EBD8"))
+                val bp = android.widget.FrameLayout.LayoutParams(
+                    android.view.ViewGroup.LayoutParams.WRAP_CONTENT,
+                    android.view.ViewGroup.LayoutParams.WRAP_CONTENT,
+                    android.view.Gravity.CENTER,
+                )
+                bp.topMargin = (110 * density).toInt()
+                overlay.addView(bar, bp)
+                content.addView(
+                    overlay,
+                    ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT),
+                )
+                val hide = object : Runnable {
+                  override fun run() {
+                    if (webview.progress >= 100) {
+                      overlay.animate().alpha(0f).setDuration(350L).withEndAction {
+                        (overlay.parent as? ViewGroup)?.removeView(overlay)
+                      }.start()
+                    } else {
+                      webview.postDelayed(this, 150L)
+                    }
+                  }
+                }
+                webview.postDelayed(hide, 400L)
+                webview.postDelayed(
+                    {
+                      if (overlay.parent != null) {
+                        overlay.animate().alpha(0f).setDuration(350L).withEndAction {
+                          (overlay.parent as? ViewGroup)?.removeView(overlay)
+                        }.start()
+                      }
+                    },
+                    20000L,
+                )""",
           )
           p.write_text(s)
           assert "SwipeRefreshLayout" in s and "enableEdgeToEdge" not in s, "MainActivity patch failed"
