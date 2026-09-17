@@ -39,29 +39,86 @@ jobs:
       - name: Init Android project
         run: npx --yes @tauri-apps/cli@$TAURI_CLI_VERSION android init
 
-      # 模板 enableEdgeToEdge() + targetSdk 36 → UI 顶进状态栏; 换成系统栏 insets padding
-      - name: Patch MainActivity for system bar insets
+      # 三个补丁: ① 系统栏 insets 修 UI 顶进状态栏 ② SwipeRefreshLayout 下拉刷新
+      # ③ 墨色底+图标闪屏(修启动白屏观感)。模板的 WebView 是 wry 运行时塞进 content 的
+      - name: Patch generated Android project
         run: |
           python3 - <<'PY'
           from pathlib import Path
+
+          # --- MainActivity.kt: insets + 下拉刷新 + 深色底 ---
           p = Path("src-tauri/gen/android/app/src/main/java/com/aiastia/moyu/MainActivity.kt")
           s = p.read_text()
           s = s.replace(
               "import android.os.Bundle\nimport androidx.activity.enableEdgeToEdge",
-              "import android.os.Bundle\nimport androidx.core.view.ViewCompat\nimport androidx.core.view.WindowInsetsCompat",
+              "import android.os.Bundle\nimport android.graphics.Color\n"
+              "import android.view.ViewGroup\nimport android.webkit.WebView\n"
+              "import androidx.core.view.ViewCompat\nimport androidx.core.view.WindowInsetsCompat\n"
+              "import androidx.swiperefreshlayout.widget.SwipeRefreshLayout",
           )
           s = s.replace(
               "    enableEdgeToEdge()\n    super.onCreate(savedInstanceState)",
               """    super.onCreate(savedInstanceState)
-                val content = findViewById<android.view.View>(android.R.id.content)
+                val content = findViewById<android.view.ViewGroup>(android.R.id.content)
                 ViewCompat.setOnApplyWindowInsetsListener(content) { v, insets ->
                   val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
                   v.setPadding(bars.left, bars.top, bars.right, bars.bottom)
                   WindowInsetsCompat.CONSUMED
+                }
+                val webview = content.getChildAt(0) as? WebView ?: return
+                val swipe = SwipeRefreshLayout(this)
+                val lp = webview.layoutParams
+                content.removeView(webview)
+                swipe.addView(
+                    webview,
+                    ViewGroup.LayoutParams(
+                        if (lp.width > 0) lp.width else ViewGroup.LayoutParams.MATCH_PARENT,
+                        if (lp.height > 0) lp.height else ViewGroup.LayoutParams.MATCH_PARENT,
+                    ),
+                )
+                content.addView(
+                    swipe,
+                    ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT),
+                )
+                webview.setBackgroundColor(Color.parseColor("#171A24"))
+                swipe.setOnRefreshListener {
+                  webview.reload()
+                  swipe.isRefreshing = false
                 }""",
           )
           p.write_text(s)
-          assert "ViewCompat" in s and "enableEdgeToEdge" not in s, "MainActivity patch failed"
+          assert "SwipeRefreshLayout" in s and "enableEdgeToEdge" not in s, "MainActivity patch failed"
+
+          # --- 主题: 窗口背景换成 墨色+图标 闪屏 ---
+          t = Path("src-tauri/gen/android/app/src/main/res/values/themes.xml")
+          s = t.read_text()
+          s = s.replace(
+              "<!-- Customize your theme here. -->",
+              '<item name="android:windowBackground">@drawable/splash</item>',
+          )
+          t.write_text(s)
+          assert "splash" in s, "themes patch failed"
+
+          d = Path("src-tauri/gen/android/app/src/main/res/drawable/splash.xml")
+          d.parent.mkdir(exist_ok=True)
+          d.write_text(
+              '<?xml version="1.0" encoding="utf-8"?>\n'
+              '<layer-list xmlns:android="http://schemas.android.com/apk/res/android">\n'
+              '  <item><shape><solid android:color="#171A24"/></shape></item>\n'
+              '  <item android:drawable="@mipmap/ic_launcher" android:gravity="center"/>\n'
+              "</layer-list>\n"
+          )
+
+          # --- 依赖: SwipeRefreshLayout ---
+          g = Path("src-tauri/gen/android/app/build.gradle.kts")
+          s = g.read_text()
+          anchor = 'implementation("androidx.appcompat:appcompat:1.7.1")'
+          s = s.replace(
+              anchor,
+              anchor + '\n    implementation("androidx.swiperefreshlayout:swiperefreshlayout:1.1.0")',
+          )
+          g.write_text(s)
+          assert "swiperefreshlayout" in s, "gradle patch failed"
           PY
 
       - name: Prepare signing keystore
