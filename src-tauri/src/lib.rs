@@ -1,5 +1,7 @@
 use tauri::{WebviewUrl, WebviewWindowBuilder};
 
+// 移动端(Android/iOS)的入口符号由该宏生成, 桌面端不需要
+#[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // 站点地址由 CI 从 secret MOYU_URL 编译期注入，仓库内不出现域名
     let raw = match option_env!("MOYU_URL") {
