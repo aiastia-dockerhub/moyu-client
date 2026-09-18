@@ -12,6 +12,8 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 tauri = { version = "2", features = [] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 
 # 更新器与弹窗仅桌面端（desktop cfg 对 cargo 依赖解析不可见, 须用标准 target_os 判断）
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
