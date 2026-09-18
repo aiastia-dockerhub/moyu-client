@@ -54,7 +54,6 @@ async fn check_updates(app: tauri::AppHandle) {
         .message(msg)
         .title("墨语 · 更新")
         .kind(MessageDialogKind::Info)
-        .buttons(MessageDialogButtons::OkCancel { ok_default: true })
         .blocking_show();
     if !confirmed {
         return;
