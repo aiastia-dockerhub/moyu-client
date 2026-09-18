@@ -18,8 +18,61 @@ pub fn run() {
             #[cfg(desktop)]
             let builder = builder.center();
             builder.build()?;
+
+            // 桌面端：注册更新器 + 启动后异步检查新版本，弹窗询问是否安装
+            #[cfg(desktop)]
+            {
+                app.handle().plugin(tauri_plugin_updater::Builder::new().build())?;
+                tauri::async_runtime::spawn(check_updates(app.handle().clone()));
+            }
             Ok(())
         })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+// 检查失败一律静默（私库/断网/无更新），不打扰使用
+#[cfg(desktop)]
+async fn check_updates(app: tauri::AppHandle) {
+    use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
+    use tauri_plugin_updater::UpdaterExt;
+
+    let updater = match app.updater() {
+        Ok(u) => u,
+        Err(_) => return,
+    };
+    let Ok(Some(update)) = updater.check().await else {
+        return;
+    };
+
+    let msg = format!(
+        "发现新版本 v{}，是否下载并安装？安装后会自动重启。",
+        update.version
+    );
+    let confirmed = app
+        .dialog()
+        .message(msg)
+        .title("墨语 · 更新")
+        .kind(MessageDialogKind::Info)
+        .buttons(MessageDialogButtons::OkCancel(true))
+        .blocking_show();
+    if !confirmed {
+        return;
+    }
+    let mut downloaded: u64 = 0;
+    let mut finished = false;
+    let _ = update
+        .download_and_install(
+            |chunk, total| {
+                downloaded += chunk as u64;
+                if total.unwrap_or(0) > 0 {
+                    println!("更新下载 {downloaded}/{total:?}");
+                }
+            },
+            || finished = true,
+        )
+        .await;
+    if finished {
+        app.restart();
+    }
 }
