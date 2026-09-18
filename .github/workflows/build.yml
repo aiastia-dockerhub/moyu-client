@@ -99,14 +99,18 @@ jobs:
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           projectPath: .
           args: ${{ matrix.args }}
           tagName: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || '' }}
           releaseName: 'Moyu ${{ github.ref_name }}'
-          releaseBody: '墨语桌面客户端（前端内嵌，秒开）。未签名：mac 首次打开右键→打开；Windows SmartScreen 点更多信息→仍要运行。'
+          releaseBody: '墨语桌面客户端（前端内嵌，秒开，支持应用内自动更新）。未签名：mac 首次打开右键→打开；Windows SmartScreen 点更多信息→仍要运行。'
           releaseDraft: false
           prerelease: false
+          includeUpdaterJson: true
+          updaterJsonPreferNsis: true
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4

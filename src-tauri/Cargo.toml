@@ -12,3 +12,8 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 tauri = { version = "2", features = [] }
+
+# 更新器与弹窗仅桌面端
+[target.'cfg(desktop)'.dependencies]
+tauri-plugin-updater = "2"
+tauri-plugin-dialog = "2"
