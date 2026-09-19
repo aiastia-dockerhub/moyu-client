@@ -35,6 +35,8 @@ pub fn run() {
 // 检查失败一律静默（断网/无更新），不打扰使用
 #[cfg(desktop)]
 async fn check_updates(app: tauri::AppHandle) {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Arc;
     use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
     use tauri_plugin_updater::UpdaterExt;
 
@@ -75,9 +77,12 @@ async fn check_updates(app: tauri::AppHandle) {
         return;
     }
 
-    // 进度小窗：关闭窗口 = 取消（本次不安装不重启，下次启动会再次询问）
+    // 进度小窗：关闭窗口 = 取消（本次不安装不重启，下次启动会再次询问）。
+    // WebviewWindow 没有 is_closed，用 Destroyed 事件置标志位。
+    let cancelled = Arc::new(AtomicBool::new(false));
+    let cancelled_for_event = cancelled.clone();
     let progress = match tauri::WebviewWindowBuilder::new(
-        app,
+        &app,
         "update-progress",
         WebviewUrl::App("progress.html".into()),
     )
@@ -85,6 +90,11 @@ async fn check_updates(app: tauri::AppHandle) {
     .inner_size(340.0, 150.0)
     .resizable(false)
     .always_on_top(true)
+    .on_window_event(move |event| {
+        if let tauri::WindowEvent::Destroyed = event {
+            cancelled_for_event.store(true, Ordering::Relaxed);
+        }
+    })
     .build()
     {
         Ok(w) => w,
@@ -100,7 +110,7 @@ async fn check_updates(app: tauri::AppHandle) {
         .download(
             |chunk, total| {
                 done += chunk as u64;
-                if win.is_closed().unwrap_or(false) {
+                if cancelled.load(Ordering::Relaxed) {
                     return;
                 }
                 if let Some(t) = total {
@@ -119,7 +129,7 @@ async fn check_updates(app: tauri::AppHandle) {
             return;
         }
     };
-    if win.is_closed().unwrap_or(false) {
+    if cancelled.load(Ordering::Relaxed) {
         eprintln!("[update] cancelled: window closed, install skipped");
         return;
     }
