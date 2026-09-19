@@ -39,10 +39,24 @@ async fn check_updates(app: tauri::AppHandle) {
 
     let updater = match app.updater() {
         Ok(u) => u,
-        Err(_) => return,
+        Err(e) => {
+            eprintln!("[update] updater init failed: {e}");
+            return;
+        }
     };
-    let Ok(Some(update)) = updater.check().await else {
-        return;
+    let update = match updater.check().await {
+        Ok(Some(u)) => {
+            eprintln!("[update] found v{}", u.version);
+            u
+        }
+        Ok(None) => {
+            eprintln!("[update] no update available");
+            return;
+        }
+        Err(e) => {
+            eprintln!("[update] check failed: {e}");
+            return;
+        }
     };
 
     let msg = format!(
@@ -55,6 +69,7 @@ async fn check_updates(app: tauri::AppHandle) {
         .title("墨语 · 更新")
         .kind(MessageDialogKind::Info)
         .blocking_show();
+    eprintln!("[update] dialog confirmed: {confirmed}");
     if !confirmed {
         return;
     }
