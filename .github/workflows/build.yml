@@ -79,6 +79,7 @@ jobs:
 
       # 更新进度小窗的页面（由 lib.rs 的 update-progress 窗口加载）
       - name: Add updater progress page
+        shell: bash
         run: |
           cat > src-tauri/app-dist/progress.html <<'HTML'
           <!doctype html><html><head><meta charset="utf-8"><style>
