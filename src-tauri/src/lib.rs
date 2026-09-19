@@ -23,7 +23,7 @@ pub fn run() {
             #[cfg(desktop)]
             {
                 app.handle().plugin(tauri_plugin_updater::Builder::new().build())?;
-                app.handle().plugin(tauri_plugin_dialog::Builder::new().build())?;
+                app.handle().plugin(tauri_plugin_dialog::init())?;
                 tauri::async_runtime::spawn(check_updates(app.handle().clone()));
             }
             Ok(())
