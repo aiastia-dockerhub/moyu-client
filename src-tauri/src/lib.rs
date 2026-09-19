@@ -19,7 +19,7 @@ pub fn run() {
             let builder = builder.center();
             builder.build()?;
 
-            // 桌面端：注册更新器 + 启动后异步检查新版本，弹窗询问是否安装
+            // 桌面端：注册更新器/对话框插件 + 启动后异步检查新版本，弹窗询问是否安装
             #[cfg(desktop)]
             {
                 app.handle().plugin(tauri_plugin_updater::Builder::new().build())?;
@@ -32,7 +32,7 @@ pub fn run() {
         .expect("error while running tauri application");
 }
 
-// 检查失败一律静默（私库/断网/无更新），不打扰使用
+// 检查失败一律静默（断网/无更新），不打扰使用
 #[cfg(desktop)]
 async fn check_updates(app: tauri::AppHandle) {
     use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
@@ -50,10 +50,7 @@ async fn check_updates(app: tauri::AppHandle) {
             eprintln!("[update] found v{}", u.version);
             u
         }
-        Ok(None) => {
-            eprintln!("[update] no update available");
-            return;
-        }
+        Ok(None) => return,
         Err(e) => {
             eprintln!("[update] check failed: {e}");
             return;
@@ -61,7 +58,7 @@ async fn check_updates(app: tauri::AppHandle) {
     };
 
     let msg = format!(
-        "发现新版本 v{}，是否下载并安装？安装后会自动重启。",
+        "发现新版本 v{}，是否立即更新？更新完成后会自动重启。",
         update.version
     );
     let confirmed = app
@@ -69,25 +66,70 @@ async fn check_updates(app: tauri::AppHandle) {
         .message(msg)
         .title("墨语 · 更新")
         .kind(MessageDialogKind::Info)
+        .buttons(MessageDialogButtons::OkCancelCustom(
+            "立即更新".to_string(),
+            "下次再说".to_string(),
+        ))
         .blocking_show();
-    eprintln!("[update] dialog confirmed: {confirmed}");
     if !confirmed {
         return;
     }
-    let mut downloaded: u64 = 0;
-    let mut finished = false;
-    let _ = update
-        .download_and_install(
+
+    // 进度小窗：关闭窗口 = 取消（本次不安装不重启，下次启动会再次询问）
+    let progress = match tauri::WebviewWindowBuilder::new(
+        app,
+        "update-progress",
+        WebviewUrl::App("progress.html".into()),
+    )
+    .title("墨语 · 正在更新")
+    .inner_size(340.0, 150.0)
+    .resizable(false)
+    .always_on_top(true)
+    .build()
+    {
+        Ok(w) => w,
+        Err(e) => {
+            eprintln!("[update] progress window failed: {e}");
+            return;
+        }
+    };
+
+    let win = progress.clone();
+    let mut done: u64 = 0;
+    let bytes = match update
+        .download(
             |chunk, total| {
-                downloaded += chunk as u64;
-                if total.unwrap_or(0) > 0 {
-                    println!("更新下载 {downloaded}/{total:?}");
+                done += chunk as u64;
+                if win.is_closed().unwrap_or(false) {
+                    return;
+                }
+                if let Some(t) = total {
+                    let pct = ((done as f64 / t as f64) * 100.0).min(100.0);
+                    let _ = win.eval(&format!("window.up({pct:.0})"));
                 }
             },
-            || finished = true,
+            || {},
         )
-        .await;
-    if finished {
-        app.restart();
+        .await
+    {
+        Ok(b) => b,
+        Err(e) => {
+            eprintln!("[update] download failed: {e}");
+            let _ = progress.close();
+            return;
+        }
+    };
+    if win.is_closed().unwrap_or(false) {
+        eprintln!("[update] cancelled: window closed, install skipped");
+        return;
     }
+    let _ = win.eval(
+        "document.querySelector('.t').textContent='下载完成，正在安装…';window.up(100)",
+    );
+    if let Err(e) = update.install(bytes) {
+        eprintln!("[update] install failed: {e}");
+        let _ = progress.close();
+        return;
+    }
+    app.restart();
 }
