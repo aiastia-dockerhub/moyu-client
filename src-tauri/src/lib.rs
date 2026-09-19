@@ -90,11 +90,6 @@ async fn check_updates(app: tauri::AppHandle) {
     .inner_size(340.0, 150.0)
     .resizable(false)
     .always_on_top(true)
-    .on_window_event(move |event| {
-        if let tauri::WindowEvent::Destroyed = event {
-            cancelled_for_event.store(true, Ordering::Relaxed);
-        }
-    })
     .build()
     {
         Ok(w) => w,
@@ -103,6 +98,11 @@ async fn check_updates(app: tauri::AppHandle) {
             return;
         }
     };
+    progress.on_window_event(move |event| {
+        if let tauri::WindowEvent::Destroyed = event {
+            cancelled_for_event.store(true, Ordering::Relaxed);
+        }
+    });
 
     let win = progress.clone();
     let mut done: u64 = 0;
