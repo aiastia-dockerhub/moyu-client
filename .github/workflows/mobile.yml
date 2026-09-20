@@ -101,7 +101,9 @@ jobs:
               """    super.onCreate(savedInstanceState)
                 val content = findViewById<android.view.ViewGroup>(android.R.id.content)
                 ViewCompat.setOnApplyWindowInsetsListener(content) { v, insets ->
-                  val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
+                  val bars = insets.getInsets(
+                    WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.ime()
+                  )
                   v.setPadding(bars.left, bars.top, bars.right, bars.bottom)
                   WindowInsetsCompat.CONSUMED
                 }
@@ -206,6 +208,16 @@ jobs:
           )
           g.write_text(s)
           assert "swiperefreshlayout" in s, "gradle patch failed"
+
+          # --- Manifest: 软键盘弹出时收缩窗口(配合上面的 ime insets) ---
+          m = Path("src-tauri/gen/android/app/src/main/AndroidManifest.xml")
+          s = m.read_text()
+          s = s.replace(
+              'android:name=".MainActivity"',
+              'android:name=".MainActivity"\n            android:windowSoftInputMode="adjustResize"',
+          )
+          m.write_text(s)
+          assert "adjustResize" in s, "manifest patch failed"
           PY
 
       - name: Prepare signing keystore
