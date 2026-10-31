@@ -388,7 +388,7 @@ jobs:
                   try {
                       val dm = getSystemService(android.app.DownloadManager::class.java)
                       if (updateDownloadId != -1L) dm.remove(updateDownloadId)
-                      val req = android.app.DownloadManager.Request(java.net.URL(url))
+                      val req = android.app.DownloadManager.Request(android.net.Uri.parse(url))
                           .setTitle("墨语 v$version")
                           .setDescription("正在下载更新…")
                           .setNotificationVisibility(android.app.DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
