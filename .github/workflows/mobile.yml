@@ -220,6 +220,226 @@ jobs:
           assert "adjustResize" in s, "manifest patch failed"
           PY
 
+      # 在线更新: tauri-plugin-updater 仅支持桌面, 安卓没有官方方案, 沿用补丁风格
+      # 原生自补一条等效链路: 启动查 GitHub latest release → 弹窗确认 →
+      # DownloadManager 后台下载(系统通知栏带进度) → 完成广播 → 调起系统安装器覆盖安装
+      - name: Patch Android in-app update
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          # --- Manifest: 安装 APK 权限 + FileProvider(安装器经它读下载好的 APK) ---
+          m = Path("src-tauri/gen/android/app/src/main/AndroidManifest.xml")
+          s = m.read_text(encoding="utf-8")
+          s = s.replace(
+              '<uses-permission android:name="android.permission.INTERNET" />',
+              '<uses-permission android:name="android.permission.INTERNET" />\n'
+              '    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />',
+          )
+          s = s.replace(
+              "</application>",
+              """        <provider
+                      android:name="androidx.core.content.FileProvider"
+                      android:authorities="${applicationId}.fileprovider"
+                      android:exported="false"
+                      android:grantUriPermissions="true">
+                      <meta-data
+                          android:name="android.support.FILE_PROVIDER_PATHS"
+                          android:resource="@xml/file_paths" />
+                  </provider>
+              </application>""",
+          )
+          m.write_text(s, encoding="utf-8")
+          assert "REQUEST_INSTALL_PACKAGES" in s and "fileprovider" in s, "manifest update patch failed"
+          assert s.count("<provider") == 1, "unexpected extra provider in manifest"
+
+          # --- FileProvider 路径表: DownloadManager 落在 app 外部 files/Download ---
+          x = Path("src-tauri/gen/android/app/src/main/res/xml/file_paths.xml")
+          x.parent.mkdir(parents=True, exist_ok=True)
+          x.write_text(
+              '<?xml version="1.0" encoding="utf-8"?>\n'
+              '<paths>\n'
+              '  <external-files-path name="apk" path="Download/" />\n'
+              '</paths>\n',
+              encoding="utf-8",
+          )
+
+          # --- MainActivity: 启动检查 + 下载完成接收器 + 安装跳转 ---
+          k = Path("src-tauri/gen/android/app/src/main/java/com/aiastia/moyu/MainActivity.kt")
+          s = k.read_text(encoding="utf-8")
+          assert "super.onCreate(savedInstanceState)" in s, "MainActivity anchor missing"
+          s = s.replace(
+              "super.onCreate(savedInstanceState)",
+              "super.onCreate(savedInstanceState)\n"
+              "        registerUpdateReceiver()\n"
+              "        checkAppUpdate()",
+              1,
+          )
+          s = s.rstrip()
+          assert s.endswith("}"), "MainActivity unexpected tail"
+          s = s[:-1] + '''
+              // ===== 在线更新(GitHub Release): 桌面走 tauri-plugin-updater(仅支持桌面),
+              // 安卓无官方方案, 原生自补: 启动查最新 release → 弹窗确认 → DownloadManager
+              // 后台下载(通知栏带进度) → 完成广播 → FileProvider 调起系统安装器 =====
+              private var pendingInstall: java.io.File? = null
+              private var updateDownloadId: Long = -1L
+
+              private val updateReceiver = object : android.content.BroadcastReceiver() {
+                  override fun onReceive(ctx: android.content.Context, intent: android.content.Intent) {
+                      try {
+                          val id = intent.getLongExtra(android.app.DownloadManager.EXTRA_DOWNLOAD_ID, -1L)
+                          if (id == -1L || id != updateDownloadId) return
+                          val dm = getSystemService(android.app.DownloadManager::class.java)
+                          val c = dm.query(android.app.DownloadManager.Query().setFilterById(id)) ?: return
+                          val ok = c.moveToFirst() &&
+                              c.getInt(c.getColumnIndexOrThrow(android.app.DownloadManager.COLUMN_STATUS)) ==
+                                  android.app.DownloadManager.STATUS_SUCCESSFUL
+                          var uri: String? = null
+                          if (ok) uri = c.getString(c.getColumnIndexOrThrow(android.app.DownloadManager.COLUMN_LOCAL_URI))
+                          c.close()
+                          if (uri != null && uri.contains("moyu-")) {
+                              updateDownloadId = -1L
+                              installApk(java.io.File(java.net.URI(uri).path))
+                          }
+                      } catch (e: Exception) {
+                          android.util.Log.w("MoyuUpdate", "download handoff failed: ${e.message}")
+                      }
+                  }
+              }
+
+              fun registerUpdateReceiver() {
+                  androidx.core.content.ContextCompat.registerReceiver(
+                      this,
+                      updateReceiver,
+                      android.content.IntentFilter(android.app.DownloadManager.ACTION_DOWNLOAD_COMPLETE),
+                      androidx.core.content.ContextCompat.RECEIVER_NOT_EXPORTED,
+                  )
+              }
+
+              fun checkAppUpdate() {
+                  Thread {
+                      try {
+                          val cur = packageManager.getPackageInfo(packageName, 0).versionName ?: return@Thread
+                          // 上一会话下载完但没装成的包(v >= 当前版本)直接补装, 旧残留清掉
+                          if (checkPendingApk(cur)) return@Thread
+                          val conn = java.net.URL("https://api.github.com/repos/aiastia-dockerhub/moyu-client/releases/latest")
+                              .openConnection() as java.net.HttpURLConnection
+                          conn.connectTimeout = 10000
+                          conn.readTimeout = 10000
+                          conn.setRequestProperty("Accept", "application/vnd.github+json")
+                          conn.setRequestProperty("User-Agent", "moyu-android")
+                          val body = conn.inputStream.bufferedReader().readText()
+                          conn.disconnect()
+                          val rel = org.json.JSONObject(body)
+                          val tag = rel.optString("tag_name").removePrefix("v")
+                          var apkUrl: String? = null
+                          val assets = rel.optJSONArray("assets")
+                          if (assets != null) {
+                              for (i in 0 until assets.length()) {
+                                  val a = assets.getJSONObject(i)
+                                  if (a.optString("name").endsWith(".apk")) {
+                                      apkUrl = a.optString("browser_download_url")
+                                      break
+                                  }
+                              }
+                          }
+                          if (tag.isEmpty() || apkUrl == null || !isNewerVersion(tag, cur)) return@Thread
+                          runOnUiThread {
+                              android.app.AlertDialog.Builder(this)
+                                  .setTitle("墨语 · 更新")
+                                  .setMessage("发现新版本 v$tag，是否立即更新？下载完成后自动弹出安装。")
+                                  .setPositiveButton("立即更新") { _, _ -> downloadUpdate(apkUrl!!, tag) }
+                                  .setNegativeButton("下次再说", null)
+                                  .show()
+                          }
+                      } catch (e: Exception) {
+                          android.util.Log.w("MoyuUpdate", "check update failed: ${e.message}")
+                      }
+                  }.start()
+              }
+
+              private fun checkPendingApk(cur: String): Boolean {
+                  try {
+                      val dir = getExternalFilesDir(android.os.Environment.DIRECTORY_DOWNLOADS) ?: return false
+                      val apks = dir.listFiles()?.filter { it.name.startsWith("moyu-") && it.name.endsWith(".apk") } ?: return false
+                      for (apk in apks) {
+                          val v = apk.name.removePrefix("moyu-").removeSuffix(".apk")
+                          if (v == cur || isNewerVersion(v, cur)) {
+                              runOnUiThread { installApk(apk) }
+                              return true
+                          }
+                          apk.delete()
+                      }
+                  } catch (e: Exception) {
+                      android.util.Log.w("MoyuUpdate", "pending apk check failed: ${e.message}")
+                  }
+                  return false
+              }
+
+              private fun isNewerVersion(remote: String, local: String): Boolean {
+                  fun nums(v: String) = v.split('.', '-').mapNotNull { it.toIntOrNull() }
+                  val r = nums(remote)
+                  val l = nums(local)
+                  for (i in 0 until maxOf(r.size, l.size)) {
+                      val a = r.getOrElse(i) { 0 }
+                      val b = l.getOrElse(i) { 0 }
+                      if (a != b) return a > b
+                  }
+                  return false
+              }
+
+              private fun downloadUpdate(url: String, version: String) {
+                  try {
+                      val dm = getSystemService(android.app.DownloadManager::class.java)
+                      if (updateDownloadId != -1L) dm.remove(updateDownloadId)
+                      val req = android.app.DownloadManager.Request(java.net.URL(url))
+                          .setTitle("墨语 v$version")
+                          .setDescription("正在下载更新…")
+                          .setNotificationVisibility(android.app.DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
+                          .setDestinationInExternalFilesDir(this, android.os.Environment.DIRECTORY_DOWNLOADS, "moyu-$version.apk")
+                      updateDownloadId = dm.enqueue(req)
+                      android.widget.Toast.makeText(this, "已开始后台下载，完成后自动弹出安装", android.widget.Toast.LENGTH_SHORT).show()
+                  } catch (e: Exception) {
+                      android.util.Log.w("MoyuUpdate", "download start failed: ${e.message}")
+                  }
+              }
+
+              private fun installApk(file: java.io.File) {
+                  try {
+                      if (android.os.Build.VERSION.SDK_INT >= 26 && !packageManager.canRequestPackageInstalls()) {
+                          pendingInstall = file
+                          startActivity(
+                              android.content.Intent(
+                                  android.provider.Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+                                  android.net.Uri.parse("package:$packageName"),
+                              )
+                          )
+                          return
+                      }
+                      pendingInstall = null
+                      val uri = androidx.core.content.FileProvider.getUriForFile(this, "$packageName.fileprovider", file)
+                      startActivity(
+                          android.content.Intent(android.content.Intent.ACTION_INSTALL_PACKAGE, uri)
+                              .addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                              .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                      )
+                  } catch (e: Exception) {
+                      android.util.Log.w("MoyuUpdate", "install failed: ${e.message}")
+                  }
+              }
+
+              override fun onResume() {
+                  super.onResume()
+                  val f = pendingInstall ?: return
+                  if (android.os.Build.VERSION.SDK_INT < 26 || packageManager.canRequestPackageInstalls()) {
+                      installApk(f)
+                  }
+              }
+          ''' + "}\n"
+          k.write_text(s, encoding="utf-8")
+          assert "checkAppUpdate" in s and "installApk" in s, "MainActivity update patch failed"
+          PY
+
       - name: Prepare signing keystore
         env:
           KS_B64: ${{ secrets.MOYU_ANDROID_KEYSTORE_B64 }}
