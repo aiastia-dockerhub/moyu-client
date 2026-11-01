@@ -360,7 +360,8 @@ jobs:
                       val apks = dir.listFiles()?.filter { it.name.startsWith("moyu-") && it.name.endsWith(".apk") } ?: return false
                       for (apk in apks) {
                           val v = apk.name.removePrefix("moyu-").removeSuffix(".apk")
-                          if (v == cur || isNewerVersion(v, cur)) {
+                          // 只补装"比当前版本新"的包; 已装过/同版本的残留必须删掉, 否则每次启动都重复弹安装
+                          if (isNewerVersion(v, cur)) {
                               runOnUiThread { installApk(apk) }
                               return true
                           }
