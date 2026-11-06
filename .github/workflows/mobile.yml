@@ -62,6 +62,12 @@ jobs:
           name: app-dist
           path: src-tauri/app-dist
 
+      # runner 默认 Java 升 25 后 Gradle 8.14 跑不了（class file major version 69），钉 LTS
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: aarch64-linux-android
